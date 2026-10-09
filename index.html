@@ -1,0 +1,332 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>生産実績入力（UI試作）</title>
+<!--
+  SANWA-OS 生産管理板 Phase 1 — 時間別実績入力 UI プロトタイプ v1.1（2026-10-09・ハンチョー🦝）
+  ・独立した 1 ファイル。サーバ・API・DB・認証・外部の読込み・ブラウザ保存は使わない（再読込で入力は消える）。
+  ・入力は「生産数」「不良数」の 2 項目だけ。集計は画面の中だけの仮計算。
+-->
+<style>
+  :root {
+    --bg: #0a1628;
+    --bg2: #0f2038;
+    --card: #12263f;
+    --card-line: #22406a;
+    --text: #f2f6fb;
+    --sub: #a9b9cf;
+    --active: #f5c518;
+    --blue: #2f7de1;
+    --blue-bg: #123a6b;
+    --red: #e0524a;
+    --red-soft: rgba(224, 82, 74, .45);
+    --red-bg: #4a1d22;
+    --red-bg-soft: #2a1f2b;
+    --ok: #22b26b;
+    --partial: #e8a33d;
+    --num-bg: #ffffff;
+    --num: #0b1424;
+    --btn: #2a3d58;
+    --btn-line: #3f5878;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: var(--bg); color: var(--text); }
+  body {
+    font-family: "Noto Sans JP", "Yu Gothic UI", "Yu Gothic", "Meiryo", system-ui, sans-serif;
+    overflow-x: hidden;
+    -webkit-text-size-adjust: 100%;
+  }
+  button, input { font: inherit; }
+
+  /* ---- 上部 ---- */
+  .top {
+    position: sticky; top: 0; z-index: 10;
+    background: linear-gradient(180deg, #0d1d34, #0a1628);
+    border-bottom: 2px solid var(--card-line);
+    padding: 14px 20px 14px;
+  }
+  .brand { font-size: 15px; color: var(--sub); letter-spacing: .08em; }
+  .brand b { color: var(--text); }
+  .title-row { display: flex; align-items: center; gap: 14px; margin-top: 4px; }
+  .title-row::before { content: ""; width: 8px; height: 40px; border-radius: 3px; background: var(--active); }
+  h1 { margin: 0; font-size: 36px; letter-spacing: .06em; }
+  .info {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 6px 18px;
+    margin-top: 12px; padding: 10px 16px;
+    border: 1px solid var(--card-line); border-radius: 10px; background: var(--bg2);
+    font-size: 20px;
+  }
+  .info div { display: flex; gap: 10px; min-width: 0; }
+  .info dt { color: var(--sub); white-space: nowrap; }
+  .info dd { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+
+  /* ---- 時間帯カード ---- */
+  main { padding: 16px 20px 300px; }
+  .slot {
+    background: var(--card);
+    border: 2px solid var(--card-line);
+    border-radius: 14px;
+    padding: 14px 16px 16px;
+    margin-bottom: 16px;
+    scroll-margin-top: 250px;
+    transition: border-color .15s, box-shadow .15s;
+  }
+  .slot.is-active {
+    border-color: var(--active);
+    box-shadow: 0 0 0 3px rgba(245, 197, 24, .35);
+    background: #162d4b;
+  }
+  .slot-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+  .slot-time { font-size: 36px; font-weight: 800; letter-spacing: .02em; font-variant-numeric: tabular-nums; }
+  .slot.is-active .slot-time::after {
+    content: "入力中"; margin-left: 12px; padding: 3px 10px; border-radius: 6px; vertical-align: middle;
+    font-size: 16px; font-weight: 700; background: var(--active); color: #1b1b1b;
+  }
+  .state { font-size: 20px; font-weight: 700; padding: 6px 14px; border-radius: 999px; white-space: nowrap; }
+  .state.empty { color: var(--sub); border: 2px solid #4a5f7c; }
+  .state.partial { color: #1b1b1b; background: var(--partial); }
+  .state.done { color: #fff; background: var(--ok); }
+
+  .pair { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+  .field { border-radius: 12px; padding: 10px 12px 12px; border: 2px solid; }
+  .field.prod { border-color: var(--blue); background: var(--blue-bg); }
+  .field.ng { border-color: var(--red-soft); background: var(--red-bg-soft); }
+  .field.ng.has-ng { border-color: var(--red); background: var(--red-bg); }
+  .field-label { display: flex; align-items: center; gap: 8px; font-size: 24px; font-weight: 800; margin-bottom: 8px; }
+  .prod .field-label { color: #cfe2ff; }
+  .ng .field-label { color: #ffc9c5; }
+  .dot { width: 14px; height: 14px; border-radius: 50%; flex: none; }
+  .prod .dot { background: var(--blue); }
+  .ng .dot { background: var(--red); }
+  .field-row { display: flex; gap: 10px; align-items: stretch; }
+  .num-wrap { position: relative; flex: 1; min-width: 0; }
+  .num {
+    width: 100%; height: 116px; border-radius: 10px; border: 3px solid transparent;
+    background: var(--num-bg); color: var(--num);
+    font-size: 60px; font-weight: 800; text-align: right; padding: 0 48px 0 12px;
+    font-variant-numeric: tabular-nums; outline: none;
+  }
+  .num::placeholder { color: #c3ccd8; font-weight: 400; }
+  .prod .num:focus { border-color: var(--blue); box-shadow: 0 0 0 4px rgba(47, 125, 225, .45); }
+  .ng .num:focus { border-color: var(--red); box-shadow: 0 0 0 4px rgba(224, 82, 74, .45); }
+  .unit { position: absolute; right: 12px; bottom: 14px; font-size: 22px; font-weight: 700; color: #4a5568; pointer-events: none; }
+  .steps { display: flex; flex-direction: column; gap: 8px; width: 72px; flex: none; }
+  .step {
+    flex: 1; min-height: 48px; border-radius: 10px; border: 2px solid var(--btn-line);
+    background: var(--btn); color: var(--text); font-size: 32px; font-weight: 800; line-height: 1;
+    cursor: pointer; touch-action: manipulation;
+  }
+  .step:active { transform: translateY(1px); filter: brightness(1.2); }
+
+  /* ---- 下部（集計・ボタン） ---- */
+  .bottom {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 10;
+    background: linear-gradient(0deg, #0a1628 80%, rgba(10, 22, 40, .92));
+    border-top: 2px solid var(--card-line);
+    padding: 12px 20px 16px;
+  }
+  .sum { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; margin-bottom: 12px; }
+  .sum div { border-radius: 10px; padding: 8px 12px; border: 2px solid; min-width: 0; }
+  .sum .s-prod { border-color: var(--blue); background: var(--blue-bg); }
+  .sum .s-ng { border-color: var(--red-soft); background: var(--red-bg-soft); }
+  .sum .s-rate { border-color: var(--btn-line); background: var(--bg2); }
+  .sum span { display: block; font-size: 17px; color: var(--sub); font-weight: 700; }
+  .sum b { display: block; font-size: 36px; text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sum small { font-size: 18px; margin-left: 4px; color: var(--sub); }
+  .actions { display: grid; grid-template-columns: 1fr 1fr 1.2fr; gap: 10px; }
+  .act {
+    height: 76px; border-radius: 12px; border: 2px solid var(--btn-line);
+    background: var(--btn); color: var(--text); font-size: 24px; font-weight: 800; cursor: pointer;
+    touch-action: manipulation;
+  }
+  .act.primary { background: var(--active); border-color: #ffd94d; color: #1b1b1b; }
+  .act:active { filter: brightness(1.15); }
+
+  /* ---- 保存（UI 確認用）のお知らせ ---- */
+  .dlg-back { position: fixed; inset: 0; z-index: 20; background: rgba(0, 0, 0, .6); display: none; align-items: center; justify-content: center; padding: 20px; }
+  .dlg-back.open { display: flex; }
+  .dlg { width: min(520px, 100%); background: #fff; color: #111; border-radius: 16px; padding: 26px 24px 20px; text-align: center; }
+  .dlg h2 { margin: 0 0 8px; font-size: 26px; }
+  .dlg p { margin: 0 0 18px; font-size: 21px; line-height: 1.6; }
+  .dlg button { width: 100%; height: 68px; border-radius: 12px; border: 0; background: #12263f; color: #fff; font-size: 24px; font-weight: 800; }
+
+  /* ---- 幅 720px 未満は ＋／－ を数字の下へ（数字の幅を確保して 5 桁まで切れないように） ---- */
+  @media (max-width: 719px) {
+    .field-row { flex-direction: column; }
+    .steps { flex-direction: row; width: auto; }
+    .step { min-height: 58px; }
+    .sum b { font-size: 30px; }
+  }
+
+  /* ---- 幅が狭いとき（縦長の小さい画面）は 2 つを縦に並べる ---- */
+  @media (max-width: 560px) {
+    h1 { font-size: 28px; }
+    .info { grid-template-columns: 1fr; font-size: 18px; }
+    .pair { grid-template-columns: 1fr; }
+    .slot-time { font-size: 30px; }
+    .sum b { font-size: 26px; }
+    .actions .act { font-size: 19px; }
+  }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand"><b>SANWA-OS</b>　生産管理板（UI試作）</div>
+  <div class="title-row"><h1>生産実績入力</h1></div>
+  <dl class="info">
+    <div><dt>ライン：</dt><dd>D2ライン</dd></div>
+    <div><dt>品番：</dt><dd>AHB-RX</dd></div>
+    <div><dt>日付：</dt><dd>2026/10/09</dd></div>
+    <div><dt>担当：</dt><dd>SANWA-U018</dd></div>
+  </dl>
+</header>
+
+<main id="slots"></main>
+
+<footer class="bottom">
+  <div class="sum" aria-live="polite">
+    <div class="s-prod"><span>累計生産数</span><b><em id="sumProd" style="font-style:normal">0</em><small>個</small></b></div>
+    <div class="s-ng"><span>累計不良数</span><b><em id="sumNg" style="font-style:normal">0</em><small>個</small></b></div>
+    <div class="s-rate"><span>不良率</span><b id="rate">—</b></div>
+  </div>
+  <div class="actions">
+    <button class="act" type="button" data-save>一時保存</button>
+    <button class="act" type="button" id="toEmpty">未入力へ移動</button>
+    <button class="act primary" type="button" data-save>保存</button>
+  </div>
+</footer>
+
+<div class="dlg-back" id="dlg" role="dialog" aria-modal="true" aria-labelledby="dlgTitle">
+  <div class="dlg">
+    <h2 id="dlgTitle">UI確認用</h2>
+    <p>保存処理は未実装です。<br>入力した値はどこにも保存されません。</p>
+    <button type="button" id="dlgOk">OK</button>
+  </div>
+</div>
+
+<script>
+(function () {
+  // 時間帯（昼休み 12:00～13:00 は除く）。表示は必ず「開始～終了」（全角の～）。
+  var SLOTS = [["08:00", "09:00"], ["09:00", "10:00"], ["10:00", "11:00"], ["11:00", "12:00"],
+               ["13:00", "14:00"], ["14:00", "15:00"], ["15:00", "16:00"], ["16:00", "17:00"]];
+  // 見た目の確認用のサンプル値（最初の 3 枠だけ）。保存はしない。
+  var SAMPLE = { 0: [100, 2], 1: [95, 1], 2: [110, 2] };
+  var MAX_DIGITS = 4;   // 1 時間あたり 9999 個まで（試作の上限）
+  var root = document.getElementById("slots");
+
+  function field(kind, label, idx) {
+    var id = kind + "-" + idx;
+    return '<div class="field ' + kind + '">' +
+      '<label class="field-label" for="' + id + '"><span class="dot"></span>' + label + '</label>' +
+      '<div class="field-row">' +
+        '<div class="num-wrap"><input class="num" id="' + id + '" data-kind="' + kind + '" type="text" inputmode="numeric" pattern="[0-9]*" ' +
+          'autocomplete="off" enterkeyhint="next" placeholder="－" aria-label="' + label + '"><span class="unit">個</span></div>' +
+        '<div class="steps">' +
+          '<button class="step" type="button" data-step="1" data-for="' + id + '" aria-label="' + label + 'を1ふやす">＋</button>' +
+          '<button class="step" type="button" data-step="-1" data-for="' + id + '" aria-label="' + label + 'を1へらす">－</button>' +
+        '</div>' +
+      '</div></div>';
+  }
+
+  root.innerHTML = SLOTS.map(function (s, i) {
+    return '<section class="slot" data-idx="' + i + '" aria-label="' + s[0] + '～' + s[1] + '">' +
+      '<div class="slot-head"><div class="slot-time">' + s[0] + '～' + s[1] + '</div><div class="state empty">未入力</div></div>' +
+      '<div class="pair">' + field("prod", "生産数", i) + field("ng", "不良数", i) + '</div></section>';
+  }).join("");
+
+  var cards = Array.prototype.slice.call(root.querySelectorAll(".slot"));
+  cards.forEach(function (c, i) {
+    if (SAMPLE[i]) { c.querySelector(".prod .num").value = SAMPLE[i][0]; c.querySelector(".ng .num").value = SAMPLE[i][1]; }
+  });
+
+  function val(input) { return input.value === "" ? null : parseInt(input.value, 10); }
+
+  function refresh() {
+    var sp = 0, sn = 0;
+    cards.forEach(function (c) {
+      var p = val(c.querySelector(".prod .num")), n = val(c.querySelector(".ng .num"));
+      var st = c.querySelector(".state");
+      if (p !== null && n !== null) { st.className = "state done"; st.textContent = "✓ 入力済み"; }
+      else if (p !== null || n !== null) { st.className = "state partial"; st.textContent = "入力途中"; }
+      else { st.className = "state empty"; st.textContent = "未入力"; }
+      c.querySelector(".field.ng").classList.toggle("has-ng", n !== null && n > 0);
+      sp += p || 0; sn += n || 0;
+    });
+    document.getElementById("sumProd").textContent = sp.toLocaleString("ja-JP");
+    document.getElementById("sumNg").textContent = sn.toLocaleString("ja-JP");
+    document.getElementById("rate").textContent = sp > 0 ? (sn / sp * 100).toFixed(2) + "%" : "—";   // 仮計算: 不良数 ÷ 生産数 × 100
+  }
+
+  function setActive(card) {
+    cards.forEach(function (c) { c.classList.toggle("is-active", c === card); });
+  }
+
+  function firstIncomplete() {
+    for (var i = 0; i < cards.length; i++) { if (!cards[i].querySelector(".state.done")) return cards[i]; }
+    return null;
+  }
+
+  root.addEventListener("input", function (e) {
+    var t = e.target;
+    if (!t.classList.contains("num")) return;
+    var clean = t.value.replace(/[０-９]/g, function (d) { return String.fromCharCode(d.charCodeAt(0) - 0xFEE0); })
+                       .replace(/[^0-9]/g, "").replace(/^0+(?=\d)/, "").slice(0, MAX_DIGITS);
+    if (clean !== t.value) t.value = clean;
+    refresh();
+  });
+
+  root.addEventListener("focusin", function (e) {
+    var card = e.target.closest(".slot");
+    if (card) setActive(card);
+    if (e.target.classList.contains("num")) setTimeout(function () { e.target.select(); }, 0);
+  });
+
+  // Enter / 次へ: 生産数 → 不良数 → 次の時間帯の生産数
+  root.addEventListener("keydown", function (e) {
+    if (e.key !== "Enter" || !e.target.classList.contains("num")) return;
+    e.preventDefault();
+    var all = Array.prototype.slice.call(root.querySelectorAll(".num"));
+    var next = all[all.indexOf(e.target) + 1];
+    if (next) next.focus(); else e.target.blur();
+  });
+
+  root.addEventListener("click", function (e) {
+    var b = e.target.closest(".step");
+    if (!b) return;
+    var input = document.getElementById(b.getAttribute("data-for"));
+    var v = Math.max(0, (val(input) || 0) + parseInt(b.getAttribute("data-step"), 10));
+    input.value = String(Math.min(v, Math.pow(10, MAX_DIGITS) - 1));
+    setActive(b.closest(".slot"));
+    refresh();
+  });
+
+  document.getElementById("toEmpty").addEventListener("click", function () {
+    var c = firstIncomplete();
+    if (!c) { openDlg("すべての時間帯が入力済みです。", "確認"); return; }
+    setActive(c);
+    c.scrollIntoView({ behavior: "smooth", block: "start" });
+    var target = c.querySelector(".prod .num").value === "" ? c.querySelector(".prod .num") : c.querySelector(".ng .num");
+    setTimeout(function () { target.focus({ preventScroll: true }); }, 350);
+  });
+
+  var dlg = document.getElementById("dlg");
+  function openDlg(msg, title) {
+    dlg.querySelector("h2").textContent = title || "UI確認用";
+    dlg.querySelector("p").innerHTML = msg || "保存処理は未実装です。<br>入力した値はどこにも保存されません。";
+    dlg.classList.add("open");
+    document.getElementById("dlgOk").focus();
+  }
+  Array.prototype.forEach.call(document.querySelectorAll("[data-save]"), function (b) {
+    b.addEventListener("click", function () { openDlg(); });
+  });
+  document.getElementById("dlgOk").addEventListener("click", function () { dlg.classList.remove("open"); });
+
+  refresh();
+  setActive(firstIncomplete() || cards[0]);
+})();
+</script>
+</body>
+</html>
